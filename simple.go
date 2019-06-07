@@ -70,12 +70,6 @@ func getDBHandler() *gorm.DB {
 	return db
 }
 
-func insertFolder(dbHandle *gorm.DB, folder *Folder) {
-	// TODO: check if already exists
-	dbHandle.Create(folder)
-	// TODO Check if it created successfully
-}
-
 func insertRecord(dbHandle *gorm.DB, record *Record) {
 	dbHandle.Create(record)
 }
