@@ -10,8 +10,9 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-// Database Models ....
+// Database Models
 // They come with ID, CreatedAt, UpdatedAt and DeletedAt for free
+
 // Folder model for ORM
 type Folder struct {
 	gorm.Model
@@ -43,7 +44,7 @@ func initDB() {
 	//db.Model(&Profile{}).AddForeignKey("record_refer", "users(refer)", "CASCADE", "CASCADE")
 }
 
-// TODO: I feel like this could be a one liner...
+// TODO: this could be a one liner...
 func fileExists(path string) bool {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return false
@@ -51,7 +52,7 @@ func fileExists(path string) bool {
 	return true
 }
 
-func main() {
+func getDBHandler() *gorm.DB {
 	// TODO: always migrate until we have data we want to save
 	os.Remove("test.db")
 
@@ -65,39 +66,55 @@ func main() {
 	if err != nil {
 		panic("failed to connect database")
 	}
-	defer db.Close()
+	return db
+}
 
-	// Create
-	db.Create(&Folder{
-		Name: "test",
+func createFolder(dbHandle *gorm.DB, folderName string) *Folder {
+	// TODO: check if already exists
+
+	dbHandle.Create(&Folder{
+		Name: folderName,
 	})
 
+	// Check if it created successfully
+	// Move this to unit test
 	var foundFolder Folder
-	db.First(&foundFolder, 0)
+	dbHandle.First(&foundFolder, 0)
 	foundFolderJ, _ := json.Marshal(foundFolder)
 	fmt.Println("Printing the folder...")
 	fmt.Println(string(foundFolderJ))
+	return &foundFolder
+}
 
-	db.Create(&Record{
-		Folder: foundFolder,
+func createRecord(dbHandle *gorm.DB, record *Record) *Record {
+	dbHandle.Create(record)
+
+	var foundRecord Record
+	dbHandle.First(&foundRecord, 1)
+	recJ, _ := json.Marshal(foundRecord)
+	fmt.Println(string(recJ))
+	return &foundRecord
+}
+
+func main() {
+
+	db := getDBHandler()
+	defer db.Close()
+	// Create
+	ptrfolder := createFolder(db, "test")
+
+	ptrrecord := createRecord(db, &Record{
+		Folder: *ptrfolder,
 		Key:    "example",
 		Data:   []byte(`{"Name":"Bob","Food":"Pickle"}`),
 	})
 
-	// Read
-
 	// TODO check searching
 	// db.First(&product, "code = ?", "L1212") // find product with code l1212
 
-	// find record with id 1
-	var record Record
-	db.First(&record, 1)
-	recJ, _ := json.Marshal(record)
-	fmt.Println(string(recJ))
-
 	// Find the folder metadata associated with this
 	var assocfolder Folder
-	db.Model(&record).Related(&assocfolder)
+	db.Model(ptrrecord).Related(&assocfolder)
 	folderJ, _ := json.Marshal(assocfolder)
 	fmt.Println(string(folderJ))
 
@@ -105,6 +122,6 @@ func main() {
 	// db.Model(&product).Update("Price", 2000)
 
 	// Delete - delete product
-	// db.Delete(&record)
-	// db.Delete(&folder)
+	db.Delete(ptrrecord)
+	db.Delete(ptrfolder)
 }
