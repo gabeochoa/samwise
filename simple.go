@@ -22,9 +22,10 @@ type Folder struct {
 // Record model for ORM
 type Record struct {
 	gorm.Model
-	Folder Folder
-	Key    string
-	Data   []byte
+	FolderID int
+	Folder   Folder
+	Key      string
+	Data     []byte
 }
 
 func initDB() {
@@ -69,31 +70,14 @@ func getDBHandler() *gorm.DB {
 	return db
 }
 
-func createFolder(dbHandle *gorm.DB, folderName string) *Folder {
+func insertFolder(dbHandle *gorm.DB, folder *Folder) {
 	// TODO: check if already exists
-
-	dbHandle.Create(&Folder{
-		Name: folderName,
-	})
-
-	// Check if it created successfully
-	// Move this to unit test
-	var foundFolder Folder
-	dbHandle.First(&foundFolder, 0)
-	foundFolderJ, _ := json.Marshal(foundFolder)
-	fmt.Println("Printing the folder...")
-	fmt.Println(string(foundFolderJ))
-	return &foundFolder
+	dbHandle.Create(folder)
+	// TODO Check if it created successfully
 }
 
-func createRecord(dbHandle *gorm.DB, record *Record) *Record {
+func insertRecord(dbHandle *gorm.DB, record *Record) {
 	dbHandle.Create(record)
-
-	var foundRecord Record
-	dbHandle.First(&foundRecord, 1)
-	recJ, _ := json.Marshal(foundRecord)
-	fmt.Println(string(recJ))
-	return &foundRecord
 }
 
 func main() {
@@ -101,27 +85,29 @@ func main() {
 	db := getDBHandler()
 	defer db.Close()
 	// Create
-	ptrfolder := createFolder(db, "test")
-
-	ptrrecord := createRecord(db, &Record{
-		Folder: *ptrfolder,
-		Key:    "example",
-		Data:   []byte(`{"Name":"Bob","Food":"Pickle"}`),
-	})
+	var exampleRecord = &Record{
+		Folder: Folder{
+			Name: "test",
+		},
+		Key:  "example",
+		Data: []byte(`{"Name":"Bob","Food":"Pickle"}`),
+	}
+	insertRecord(db, exampleRecord)
 
 	// TODO check searching
 	// db.First(&product, "code = ?", "L1212") // find product with code l1212
 
 	// Find the folder metadata associated with this
 	var assocfolder Folder
-	db.Model(ptrrecord).Related(&assocfolder)
+	db.Model(exampleRecord).Related(&assocfolder)
 	folderJ, _ := json.Marshal(assocfolder)
+	fmt.Println("///Associated Folder ///")
 	fmt.Println(string(folderJ))
-
+	fmt.Println("///End Folder ///")
 	// Update - update product's price to 2000
 	// db.Model(&product).Update("Price", 2000)
 
 	// Delete - delete product
-	db.Delete(ptrrecord)
-	db.Delete(ptrfolder)
+	// db.Delete(ptrrecord)
+	// db.Delete(ptrfolder)
 }
