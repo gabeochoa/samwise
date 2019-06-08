@@ -128,6 +128,8 @@ func (s *Samwise) Initialize() {
 	}
 	insertRecord(s.DB, exampleRecord)
 
+	s.DB.Create(&Folder{Name: "test2"})
+
 	// TODO: i guess it automatically closes on finish
 	//defer s.db.Close()
 }
@@ -136,6 +138,8 @@ func (s *Samwise) Initialize() {
 func (s *Samwise) Run(addr string) {
 
 	baseURL := "/api/v1"
+	s.Router.HandleFunc(baseURL+"/keys/{folder}", s.handleKeysGet).Methods("GET")
+
 	s.Router.HandleFunc(baseURL+"/{folder}/{key}", s.handleBasicGet).Methods("GET")
 	s.Router.HandleFunc(baseURL+"/{folder}/{key}", s.handleBasicPost).Methods("POST")
 	http.ListenAndServe(addr, s.Router)
@@ -151,6 +155,37 @@ func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	w.Write(response)
+}
+
+func (s *Samwise) getMatchingFolderOrNil(name string, folder *Folder) error {
+	fresult := s.DB.Where("name = ?", name).Find(folder)
+	return fresult.Error
+}
+
+func (s *Samwise) handleKeysGet(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	folder := vars["folder"]
+	fmt.Fprintf(w, "You've requested the folder: %s\n", folder)
+
+	// Find folder to match...
+	var matchedFolder Folder
+	err := s.getMatchingFolderOrNil(folder, &matchedFolder)
+	if err != nil {
+		fmt.Fprintf(w, "didnt find your folder")
+		return
+	}
+
+	var records []Record
+	// This needs to be {}
+	// so json marshall will send back [] when empty
+	keys := []string{}
+
+	s.DB.Model(&matchedFolder).Related(&records)
+
+	for _, record := range records {
+		keys = append(keys, record.Key)
+	}
+	respondWithJSON(w, http.StatusOK, keys)
 }
 
 // GetResponse : used
