@@ -175,8 +175,7 @@ func (s *Samwise) handleKeysGet(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	folder := vars["folder"]
 	messages := []string{}
-
-	messages = append(messages, fmt.Sprintf("You've requested the folder: %s\n", folder))
+	messages = append(messages, fmt.Sprintf("You've requested the folder: %s", folder))
 
 	// Find folder to match...
 	var matchedFolder Folder
@@ -201,32 +200,57 @@ func (s *Samwise) handleKeysGet(w http.ResponseWriter, r *http.Request) {
 	for _, record := range records {
 		keys = append(keys, record.Key)
 	}
-	respondWithJSON(w, http.StatusOK, keys)
+
+	respondWithJSON(w, http.StatusOK, GetResponse{
+		Query:    vars,
+		Data:     keys,
+		Success:  true,
+		Messages: messages,
+	})
 }
 
 func (s *Samwise) handleBasicGet(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	folder := vars["folder"]
 	key := vars["key"]
-	fmt.Fprintf(w, "You've requested the folder: %s with key %s\n", folder, key)
+	messages := []string{}
+	messages = append(messages, fmt.Sprintf("You've requested the folder: %s with key %s\n", folder, key))
 
 	// Find folder to match...
 	var matchedFolder Folder
 	fresult := s.DB.Where("name = ?", folder).Find(&matchedFolder)
 	if fresult.Error != nil {
-		fmt.Fprintf(w, "didnt find your folder")
+		respondWithJSON(w, http.StatusNotFound,
+			GetResponse{
+				Query:    vars,
+				Data:     make(map[string]string),
+				Success:  false,
+				Messages: append(messages, "Folder not found"),
+			})
 		return
 	}
+
 	var record Record
 	rresult := s.DB.Model(&matchedFolder).Where("key = ?", key).Find(&record)
 	if rresult.Error != nil {
-		fmt.Fprintf(w, "didnt find your record")
+		respondWithJSON(w, http.StatusNotFound,
+			GetResponse{
+				Query:    vars,
+				Data:     make(map[string]string),
+				Success:  false,
+				Messages: append(messages, "Record not found"),
+			})
 		return
 	}
 
 	// recordj, _ := json.Marshal(&record)
 	// fmt.Fprintf(w, "looked for a record and found %s", recordj)
-	respondWithJSON(w, http.StatusOK, record)
+	respondWithJSON(w, http.StatusOK, GetResponse{
+		Query:    vars,
+		Data:     record,
+		Success:  true,
+		Messages: messages,
+	})
 }
 
 func (s *Samwise) handleBasicPost(w http.ResponseWriter, r *http.Request) {
