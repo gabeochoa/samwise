@@ -135,7 +135,7 @@ func (s *Samwise) Initialize() {
 }
 
 // Run function to host our application; starts the webserver
-func (s *Samwise) Run(addr string) {
+func (s *Samwise) Run(addr string) int {
 
 	baseURL := "/api/v1"
 	s.Router.HandleFunc(baseURL+"/keys/{folder}", s.handleKeysGet).Methods("GET")
@@ -143,6 +143,15 @@ func (s *Samwise) Run(addr string) {
 	s.Router.HandleFunc(baseURL+"/{folder}/{key}", s.handleBasicGet).Methods("GET")
 	s.Router.HandleFunc(baseURL+"/{folder}/{key}", s.handleBasicPost).Methods("POST")
 	http.ListenAndServe(addr, s.Router)
+	return 0
+}
+
+// GetResponse : used
+type GetResponse struct {
+	Query    interface{}
+	Data     interface{}
+	Success  bool
+	Messages []string
 }
 
 func respondWithError(w http.ResponseWriter, code int, message string) {
@@ -165,13 +174,20 @@ func (s *Samwise) getMatchingFolderOrNil(name string, folder *Folder) error {
 func (s *Samwise) handleKeysGet(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	folder := vars["folder"]
-	fmt.Fprintf(w, "You've requested the folder: %s\n", folder)
+	messages := []string{}
+
+	messages = append(messages, fmt.Sprintf("You've requested the folder: %s\n", folder))
 
 	// Find folder to match...
 	var matchedFolder Folder
 	err := s.getMatchingFolderOrNil(folder, &matchedFolder)
 	if err != nil {
-		fmt.Fprintf(w, "didnt find your folder")
+		respondWithJSON(w, http.StatusNotFound, GetResponse{
+			Query:    make(map[string]string),
+			Data:     make(map[string]string),
+			Success:  false,
+			Messages: append(messages, "Folder not found"),
+		})
 		return
 	}
 
@@ -186,12 +202,6 @@ func (s *Samwise) handleKeysGet(w http.ResponseWriter, r *http.Request) {
 		keys = append(keys, record.Key)
 	}
 	respondWithJSON(w, http.StatusOK, keys)
-}
-
-// GetResponse : used
-type GetResponse struct {
-	Query interface{}
-	Data  interface{}
 }
 
 func (s *Samwise) handleBasicGet(w http.ResponseWriter, r *http.Request) {
