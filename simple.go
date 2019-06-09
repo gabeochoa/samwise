@@ -154,21 +154,15 @@ type GetResponse struct {
 	Messages []string
 }
 
-func respondWithError(w http.ResponseWriter, code int, message string) {
-	respondWithJSON(w, code, map[string]string{"error": message})
-}
-
 func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
 	response, _ := json.Marshal(payload)
-
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	w.Write(response)
 }
 
 func (s *Samwise) getMatchingFolderOrNil(name string, folder *Folder) error {
-	fresult := s.DB.Where("name = ?", name).Find(folder)
-	return fresult.Error
+	return s.DB.Where("name = ?", name).Find(folder).Error
 }
 
 func (s *Samwise) handleKeysGet(w http.ResponseWriter, r *http.Request) {
@@ -209,12 +203,44 @@ func (s *Samwise) handleKeysGet(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func recordProcessMeta(record Record, meta string) interface{} {
+	var output map[string]interface{}
+	switch meta {
+	case "only":
+		recj, _ := json.Marshal(record)
+		json.Unmarshal(recj, &output)
+
+		delete(output, "Data")
+		// output["ID"] = record.ID
+		// output["CreatedAt"] = record.CreatedAt
+		// output["UpdatedAt"] = record.UpdatedAt
+		// output["DeletedAt"] = record.DeletedAt
+		// output["Key"] = record.Key
+		// output["FolderID"] = record.FolderID
+		break
+	case "on":
+		// do nothing
+		// output
+		recj, _ := json.Marshal(record)
+		json.Unmarshal(recj, &output)
+
+		break
+	case "off":
+		json.Unmarshal(record.Data, &output)
+		break
+	}
+	return output
+}
+
 func (s *Samwise) handleBasicGet(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	folder := vars["folder"]
 	key := vars["key"]
+
+	vars["meta"] = r.URL.Query()["meta"][0]
+
 	messages := []string{}
-	messages = append(messages, fmt.Sprintf("You've requested the folder: %s with key %s\n", folder, key))
+	messages = append(messages, fmt.Sprintf("You've requested the folder: %s with key %s", folder, key))
 
 	// Find folder to match...
 	var matchedFolder Folder
@@ -243,11 +269,11 @@ func (s *Samwise) handleBasicGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// recordj, _ := json.Marshal(&record)
-	// fmt.Fprintf(w, "looked for a record and found %s", recordj)
+	output := recordProcessMeta(record, vars["meta"])
+
 	respondWithJSON(w, http.StatusOK, GetResponse{
 		Query:    vars,
-		Data:     record,
+		Data:     output,
 		Success:  true,
 		Messages: messages,
 	})
@@ -257,12 +283,21 @@ func (s *Samwise) handleBasicPost(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	folder := vars["folder"]
 	key := vars["key"]
-	fmt.Fprintf(w, "You've requested the folder: %s with key %s\n", folder, key)
+
+	messages := []string{}
+	messages = append(messages, fmt.Sprintf("You've requested the folder: %s with key %s", folder, key))
 
 	var data interface{}
 	decoder := json.NewDecoder(r.Body)
 	if err := decoder.Decode(&data); err != nil {
-		respondWithError(w, http.StatusBadRequest, "Invalid request payload")
+		respondWithJSON(w, http.StatusBadRequest,
+			GetResponse{
+				Query:    vars,
+				Data:     make(map[string]string),
+				Success:  false,
+				Messages: append(messages, "Invalid request payload"),
+			})
+
 		return
 	}
 	defer r.Body.Close()
@@ -272,7 +307,12 @@ func (s *Samwise) handleBasicPost(w http.ResponseWriter, r *http.Request) {
 	// 	respondWithError(w, http.StatusInternalServerError, err.Error())
 	// 	return
 	// }
-	respondWithJSON(w, http.StatusCreated, data)
+	respondWithJSON(w, http.StatusCreated, GetResponse{
+		Query:    vars,
+		Data:     data,
+		Success:  true,
+		Messages: append(messages, "Created Successfully"),
+	})
 }
 
 func main() {
