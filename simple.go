@@ -80,12 +80,13 @@ func dbTesting() {
 	db := getDBHandler()
 	defer db.Close()
 	// Create
+	exampleData, _ := json.Marshal(map[string]interface{}{"Name": "Bob", "Food": "Pickle"})
 	var exampleRecord = &Record{
 		Folder: Folder{
 			Name: "test",
 		},
 		Key:  "example",
-		Data: []byte(`{"Name":"Bob","Food":"Pickle"}`),
+		Data: exampleData,
 	}
 	insertRecord(db, exampleRecord)
 
@@ -119,12 +120,13 @@ func (s *Samwise) Initialize() {
 	s.Router = mux.NewRouter()
 	s.DB = getDBHandler()
 
+	exampleData, _ := json.Marshal(map[string]interface{}{"Name": "Bob", "Food": "Pickle"})
 	var exampleRecord = &Record{
 		Folder: Folder{
 			Name: "test",
 		},
 		Key:  "example",
-		Data: []byte(`{"Name":"Bob","Food":"Pickle"}`),
+		Data: exampleData,
 	}
 	insertRecord(s.DB, exampleRecord)
 
@@ -223,7 +225,9 @@ func recordProcessMeta(record Record, meta string) interface{} {
 		// output
 		recj, _ := json.Marshal(record)
 		json.Unmarshal(recj, &output)
-
+		var dataj map[string]interface{}
+		json.Unmarshal(record.Data, &dataj)
+		output["Data"] = dataj
 		break
 	case "off":
 		json.Unmarshal(record.Data, &output)
