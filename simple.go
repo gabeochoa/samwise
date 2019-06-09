@@ -156,7 +156,9 @@ type GetResponse struct {
 	Messages []string
 }
 
-func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
+// TODO: the top most level of keys dont get sorted
+
+func respondWithJSON(w http.ResponseWriter, code int, payload GetResponse) {
 	response, _ := json.Marshal(payload)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
@@ -211,14 +213,7 @@ func recordProcessMeta(record Record, meta string) interface{} {
 	case "only":
 		recj, _ := json.Marshal(record)
 		json.Unmarshal(recj, &output)
-
 		delete(output, "Data")
-		// output["ID"] = record.ID
-		// output["CreatedAt"] = record.CreatedAt
-		// output["UpdatedAt"] = record.UpdatedAt
-		// output["DeletedAt"] = record.DeletedAt
-		// output["Key"] = record.Key
-		// output["FolderID"] = record.FolderID
 		break
 	case "on":
 		// do nothing
