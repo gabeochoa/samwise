@@ -140,8 +140,8 @@ func (s *Samwise) Initialize() {
 func (s *Samwise) Run(addr string) int {
 
 	baseURL := "/api/v1"
+	s.Router.HandleFunc(baseURL+"/folders", s.handleFoldersGet).Methods("GET")
 	s.Router.HandleFunc(baseURL+"/keys/{folder}", s.handleKeysGet).Methods("GET")
-
 	s.Router.HandleFunc(baseURL+"/{folder}/{key}", s.handleBasicGet).Methods("GET")
 	s.Router.HandleFunc(baseURL+"/{folder}/{key}", s.handleBasicPost).Methods("POST")
 	http.ListenAndServe(addr, s.Router)
@@ -169,6 +169,18 @@ func (s *Samwise) getMatchingFolderOrNil(name string, folder *Folder) error {
 	return s.DB.Where("name = ?", name).Find(folder).Error
 }
 
+func (s *Samwise) handleFoldersGet(w http.ResponseWriter, r *http.Request) {
+	var folders []Folder
+	s.DB.Find(&folders)
+	respondWithJSON(w, http.StatusOK, GetResponse{
+		Query: map[string]string{
+			"folders": "all",
+		},
+		Data:     folders,
+		Success:  true,
+		Messages: make([]string, 0),
+	})
+}
 func (s *Samwise) handleKeysGet(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	folder := vars["folder"]
@@ -177,8 +189,7 @@ func (s *Samwise) handleKeysGet(w http.ResponseWriter, r *http.Request) {
 
 	// Find folder to match...
 	var matchedFolder Folder
-	err := s.getMatchingFolderOrNil(folder, &matchedFolder)
-	if err != nil {
+	if err := s.getMatchingFolderOrNil(folder, &matchedFolder); err != nil {
 		respondWithJSON(w, http.StatusNotFound, GetResponse{
 			Query:    make(map[string]string),
 			Data:     make(map[string]string),
@@ -189,11 +200,10 @@ func (s *Samwise) handleKeysGet(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var records []Record
+	s.DB.Model(&matchedFolder).Related(&records)
 	// This needs to be {}
 	// so json marshall will send back [] when empty
 	keys := []string{}
-
-	s.DB.Model(&matchedFolder).Related(&records)
 
 	for _, record := range records {
 		keys = append(keys, record.Key)
@@ -243,8 +253,7 @@ func (s *Samwise) handleBasicGet(w http.ResponseWriter, r *http.Request) {
 
 	// Find folder to match...
 	var matchedFolder Folder
-	fresult := s.DB.Where("name = ?", folder).Find(&matchedFolder)
-	if fresult.Error != nil {
+	if fresult := s.DB.Where("name = ?", folder).Find(&matchedFolder); fresult.Error != nil {
 		respondWithJSON(w, http.StatusNotFound,
 			GetResponse{
 				Query:    vars,
@@ -256,8 +265,7 @@ func (s *Samwise) handleBasicGet(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var record Record
-	rresult := s.DB.Model(&matchedFolder).Where("key = ?", key).Find(&record)
-	if rresult.Error != nil {
+	if s.DB.Model(&matchedFolder).Where("key = ?", key).Find(&record).Error != nil {
 		respondWithJSON(w, http.StatusNotFound,
 			GetResponse{
 				Query:    vars,
