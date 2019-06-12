@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/md5"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -20,16 +21,64 @@ import (
 // Folder model for ORM
 type Folder struct {
 	gorm.Model
-	Name string
+	Name       string
+	Expiration time.Duration
 }
 
 // Record model for ORM
 type Record struct {
 	gorm.Model
+	FolderID    int
+	Folder      Folder
+	Key         string
+	Data        []byte
+	LastTouched time.Time
+}
+
+// Now model represents what the current data looks like
+type Now struct {
+	gorm.Model
+	RecordID int
+	Record   Record
 	FolderID int
 	Folder   Folder
 	Key      string
-	Data     []byte
+	Hash     []byte
+}
+
+// EventType which represents what kind of event happened
+type EventType int
+
+const (
+	// NoChange ...
+	NoChange EventType = iota
+	// Insert ...
+	Insert
+	// Update ...
+	Update
+)
+
+func eventTypeToString(event EventType) string {
+	switch event {
+	case NoChange:
+		return "No Change"
+		break
+	case Insert:
+		return "Insert"
+		break
+	case Update:
+		return "Update"
+		break
+	}
+	return "Unsupported Event"
+}
+
+// Event ...
+type Event struct {
+	gorm.Model
+	RecordID  int
+	Record    Record
+	EventType EventType
 }
 
 func initDB() {
@@ -42,6 +91,8 @@ func initDB() {
 	// Migrate the schema
 	db.AutoMigrate(&Record{})
 	db.AutoMigrate(&Folder{})
+	db.AutoMigrate(&Now{})
+	db.AutoMigrate(&Event{})
 
 	// Apply extra rules
 
@@ -362,7 +413,7 @@ func (s *Samwise) handleBasicPost(w http.ResponseWriter, r *http.Request) {
 
 		return
 	}
-	defer r.Body.Close()
+	r.Body.Close()
 
 	var matchedFolder Folder
 	if err := s.getMatchingFolderOrNil(folder, &matchedFolder); err != nil {
@@ -375,17 +426,55 @@ func (s *Samwise) handleBasicPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Is this an insert or an update?
+	val, _ := json.Marshal(data)
+	hash := md5.Sum(val)
+
+	var existingKey Now
+	var existingData Now
+	justKeyResult := (s.DB.
+		Where("key = ?", key).
+		Find(&existingKey))
+
+	hashResult := (justKeyResult.
+		Where("hash = ", hash).
+		Find(&existingData))
+
+	existingKeyNotFound := justKeyResult.Error != nil
+	existingDataNotMatched := hashResult.Error != nil
+	var event EventType
+	if existingKeyNotFound {
+		event = Insert
+	} else if existingDataNotMatched {
+		event = Update
+	} else {
+		event = NoChange
+	}
+
+	messages = append(messages, fmt.Sprint(existingKey))
+	messages = append(messages, fmt.Sprint(existingData))
+	messages = append(messages, fmt.Sprint("event is ", eventTypeToString(event)))
+
 	marshalledD, _ := json.Marshal(data)
 
-	result := s.DB.Create(&Record{
-		Folder: matchedFolder,
-		Key:    key,
-		Data:   marshalledD,
-	})
+	var success bool
+	var msg string
 
-	if result.Error != nil {
-		messages = append(messages, fmt.Sprint(result.Error))
-		messages = append(messages, "Failed to create record")
+	switch event {
+	case Insert:
+		success, msg = s.postInsertEvent(matchedFolder, key, hash, marshalledD, event)
+		break
+	case Update:
+		success, msg = s.postUpdateEvent(matchedFolder, key, hash, existingData, marshalledD, event)
+		break
+	case NoChange:
+		success, msg = s.postNoChangeEvent(matchedFolder, key, hash, existingData, marshalledD, event)
+		break
+	}
+
+	if !success {
+		messages = append(messages, fmt.Sprint(msg))
+		messages = append(messages, "Failed")
 
 		respondWithJSON(w, http.StatusInternalServerError, GetResponse{
 			Query:    vars,
@@ -402,8 +491,139 @@ func (s *Samwise) handleBasicPost(w http.ResponseWriter, r *http.Request) {
 		Success:  true,
 		Messages: append(messages, "Created Successfully"),
 	})
+	return
 }
 
+func (s *Samwise) postInsertEvent(
+	matchedFolder Folder,
+	key string,
+	hash [16]byte,
+	marshalledD []byte,
+	event EventType) (bool, string) {
+
+	// Start transaction
+	tx := s.DB.Begin()
+
+	// add record
+	record := Record{
+		Folder:      matchedFolder,
+		Key:         key,
+		Data:        marshalledD,
+		LastTouched: time.Now(),
+	}
+
+	result := tx.Create(&record)
+	if result.Error != nil {
+		tx.Rollback()
+		return false, fmt.Sprintf("Failed to create record %s", result.Error)
+	}
+	// add event to event table
+	result = tx.Create(&Event{
+		Record:    record,
+		EventType: event,
+	})
+	if result.Error != nil {
+		tx.Rollback()
+		return false, fmt.Sprintf("Failed to create Event %s", result.Error)
+	}
+	// add now
+	result = tx.Create(&Now{
+		Record: record,
+		Folder: matchedFolder,
+		Key:    key,
+		Hash:   hash[:],
+	})
+	if result.Error != nil {
+		tx.Rollback()
+		return false, fmt.Sprintf("Failed to create Now %s", result.Error)
+	}
+	tx.Commit()
+	return true, "Insert Successfull"
+}
+
+func (s *Samwise) postUpdateEvent(
+	matchedFolder Folder,
+	key string,
+	hash [16]byte,
+	existingData Now,
+	marshalledD []byte,
+	event EventType) (bool, string) {
+
+	// Start transaction
+	tx := s.DB.Begin()
+
+	// add record
+	record := Record{
+		Folder:      matchedFolder,
+		Key:         key,
+		Data:        marshalledD,
+		LastTouched: time.Now(),
+	}
+	result := tx.Create(&record)
+	if result.Error != nil {
+		tx.Rollback()
+		return false, fmt.Sprintf("Failed to create Record %s", result.Error)
+	}
+	// add event to event table
+	result = tx.Create(&Event{
+		Record:    record,
+		EventType: event,
+	})
+	if result.Error != nil {
+		tx.Rollback()
+		return false, fmt.Sprintf("Failed to create Event %s", result.Error)
+	}
+
+	// change now to represent new data
+	existingData.Record = record
+	existingData.Hash = hash[:]
+	result = tx.Save(&existingData)
+
+	if result.Error != nil {
+		tx.Rollback()
+		return false, fmt.Sprintf("Failed to update Now %s", result.Error)
+	}
+	tx.Commit()
+	return true, ""
+}
+
+func (s *Samwise) postNoChangeEvent(
+	matchedFolder Folder,
+	key string,
+	hash [16]byte,
+	existingData Now,
+	marshalledD []byte,
+	event EventType) (bool, string) {
+
+	// Start transaction
+	tx := s.DB.Begin()
+
+	// in the case of no change
+
+	// update record touched at time
+
+	existingData.Record.LastTouched = time.Now()
+	result := tx.Save(&existingData)
+	if result.Error != nil {
+		tx.Rollback()
+		return false, fmt.Sprintf("Failed to update record %s", result.Error)
+	}
+
+	// add event to event table
+	result = tx.Create(&Event{
+		Record:    existingData.Record,
+		EventType: event,
+	})
+	if result.Error != nil {
+		tx.Rollback()
+		return false, fmt.Sprintf("Failed to create event %s", result.Error)
+	}
+
+	tx.Commit()
+	return true, ""
+}
+
+// RequestLogger ...
 func RequestLogger(targetMux http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
