@@ -3,8 +3,10 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/jinzhu/gorm"
@@ -141,10 +143,11 @@ func (s *Samwise) Run(addr string) int {
 
 	baseURL := "/api/v1"
 	s.Router.HandleFunc(baseURL+"/folders", s.handleFoldersGet).Methods("GET")
+	s.Router.HandleFunc(baseURL+"/folders/{folder}", s.handleFoldersPost).Methods("POST")
 	s.Router.HandleFunc(baseURL+"/keys/{folder}", s.handleKeysGet).Methods("GET")
 	s.Router.HandleFunc(baseURL+"/{folder}/{key}", s.handleBasicGet).Methods("GET")
 	s.Router.HandleFunc(baseURL+"/{folder}/{key}", s.handleBasicPost).Methods("POST")
-	http.ListenAndServe(addr, s.Router)
+	http.ListenAndServe(addr, RequestLogger(s.Router))
 	return 0
 }
 
@@ -169,6 +172,50 @@ func (s *Samwise) getMatchingFolderOrNil(name string, folder *Folder) error {
 	return s.DB.Where("name = ?", name).Find(folder).Error
 }
 
+func (s *Samwise) handleFoldersPost(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	folder := vars["folder"]
+
+	messages := []string{}
+	messages = append(messages, fmt.Sprintf("You've requested to create the folder: %s", folder))
+
+	var data interface{}
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&data); err != nil {
+		respondWithJSON(w, http.StatusBadRequest,
+			GetResponse{
+				Query:    vars,
+				Data:     make(map[string]string),
+				Success:  false,
+				Messages: append(messages, "Invalid request payload"),
+			})
+
+		return
+	}
+	defer r.Body.Close()
+
+	result := s.DB.Create(&Folder{
+		Name: folder,
+	})
+	if result.Error != nil {
+		messages = append(messages, fmt.Sprint(result.Error))
+		respondWithJSON(w, http.StatusCreated, GetResponse{
+			Query:    vars,
+			Data:     data,
+			Success:  false,
+			Messages: append(messages, "Failed to create"),
+		})
+		return
+	}
+
+	respondWithJSON(w, http.StatusCreated, GetResponse{
+		Query:    vars,
+		Data:     data,
+		Success:  true,
+		Messages: append(messages, "Created Successfully"),
+	})
+}
+
 func (s *Samwise) handleFoldersGet(w http.ResponseWriter, r *http.Request) {
 	var folders []Folder
 	s.DB.Find(&folders)
@@ -181,6 +228,7 @@ func (s *Samwise) handleFoldersGet(w http.ResponseWriter, r *http.Request) {
 		Messages: make([]string, 0),
 	})
 }
+
 func (s *Samwise) handleKeysGet(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	folder := vars["folder"]
@@ -246,7 +294,14 @@ func (s *Samwise) handleBasicGet(w http.ResponseWriter, r *http.Request) {
 	folder := vars["folder"]
 	key := vars["key"]
 
-	vars["meta"] = r.URL.Query()["meta"][0]
+	queryParams := r.URL.Query()
+
+	if val, ok := queryParams["meta"]; ok {
+		vars["meta"] = val[0]
+	} else {
+		defaultMeta := "off"
+		vars["meta"] = defaultMeta
+	}
 
 	messages := []string{}
 	messages = append(messages, fmt.Sprintf("You've requested the folder: %s with key %s", folder, key))
@@ -309,16 +364,62 @@ func (s *Samwise) handleBasicPost(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	// TODO: actually create and add json to db
-	// if err := p.createProduct(a.DB); err != nil {
-	// 	respondWithError(w, http.StatusInternalServerError, err.Error())
-	// 	return
-	// }
+	var matchedFolder Folder
+	if err := s.getMatchingFolderOrNil(folder, &matchedFolder); err != nil {
+		respondWithJSON(w, http.StatusNotFound, GetResponse{
+			Query:    make(map[string]string),
+			Data:     make(map[string]string),
+			Success:  false,
+			Messages: append(messages, "Folder not found"),
+		})
+		return
+	}
+
+	marshalledD, _ := json.Marshal(data)
+
+	result := s.DB.Create(&Record{
+		Folder: matchedFolder,
+		Key:    key,
+		Data:   marshalledD,
+	})
+
+	if result.Error != nil {
+		messages = append(messages, fmt.Sprint(result.Error))
+		messages = append(messages, "Failed to create record")
+
+		respondWithJSON(w, http.StatusInternalServerError, GetResponse{
+			Query:    vars,
+			Data:     data,
+			Success:  false,
+			Messages: messages,
+		})
+		return
+	}
+
 	respondWithJSON(w, http.StatusCreated, GetResponse{
 		Query:    vars,
 		Data:     data,
 		Success:  true,
 		Messages: append(messages, "Created Successfully"),
+	})
+}
+
+func RequestLogger(targetMux http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+
+		targetMux.ServeHTTP(w, r)
+
+		// log request by who(IP address)
+		requesterIP := r.RemoteAddr
+
+		log.Printf(
+			"%s\t\t%s\t\t%s\t\t%v",
+			r.Method,
+			r.RequestURI,
+			requesterIP,
+			time.Since(start),
+		)
 	})
 }
 
