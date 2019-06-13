@@ -428,24 +428,27 @@ func (s *Samwise) handleBasicPost(w http.ResponseWriter, r *http.Request) {
 
 	// Is this an insert or an update?
 	val, _ := json.Marshal(data)
-	hash := md5.Sum(val)
+	_hash := md5.Sum(val)
+	hash := _hash[:] // convert from [16]byte to []byte
 
 	var existingKey Now
 	var existingData Now
+	var countKey int
+	var countHash int
 	justKeyResult := (s.DB.
 		Where("key = ?", key).
-		Find(&existingKey))
+		Find(&existingKey).
+		Count(&countKey))
 
-	hashResult := (justKeyResult.
-		Where("hash = ", hash).
-		Find(&existingData))
+	_ = (justKeyResult.
+		Where("hash = ?", hash).
+		Find(&existingData).
+		Count(&countHash))
 
-	existingKeyNotFound := justKeyResult.Error != nil
-	existingDataNotMatched := hashResult.Error != nil
 	var event EventType
-	if existingKeyNotFound {
+	if countKey == 0 {
 		event = Insert
-	} else if existingDataNotMatched {
+	} else if countHash == 0 {
 		event = Update
 	} else {
 		event = NoChange
@@ -497,7 +500,7 @@ func (s *Samwise) handleBasicPost(w http.ResponseWriter, r *http.Request) {
 func (s *Samwise) postInsertEvent(
 	matchedFolder Folder,
 	key string,
-	hash [16]byte,
+	hash []byte,
 	marshalledD []byte,
 	event EventType) (bool, string) {
 
@@ -531,7 +534,7 @@ func (s *Samwise) postInsertEvent(
 		Record: record,
 		Folder: matchedFolder,
 		Key:    key,
-		Hash:   hash[:],
+		Hash:   hash,
 	})
 	if result.Error != nil {
 		tx.Rollback()
@@ -544,7 +547,7 @@ func (s *Samwise) postInsertEvent(
 func (s *Samwise) postUpdateEvent(
 	matchedFolder Folder,
 	key string,
-	hash [16]byte,
+	hash []byte,
 	existingData Now,
 	marshalledD []byte,
 	event EventType) (bool, string) {
@@ -576,7 +579,7 @@ func (s *Samwise) postUpdateEvent(
 
 	// change now to represent new data
 	existingData.Record = record
-	existingData.Hash = hash[:]
+	existingData.Hash = hash
 	result = tx.Save(&existingData)
 
 	if result.Error != nil {
@@ -590,7 +593,7 @@ func (s *Samwise) postUpdateEvent(
 func (s *Samwise) postNoChangeEvent(
 	matchedFolder Folder,
 	key string,
-	hash [16]byte,
+	hash []byte,
 	existingData Now,
 	marshalledD []byte,
 	event EventType) (bool, string) {
@@ -646,5 +649,6 @@ func RequestLogger(targetMux http.Handler) http.Handler {
 func main() {
 	s := Samwise{}
 	s.Initialize()
+	s.DB.LogMode(true)
 	s.Run(":8080")
 }
