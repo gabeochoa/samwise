@@ -42,8 +42,8 @@ func main() {
 	}
 	// fmt.Println("response Status:", resp.Status)
 	// fmt.Println("response Headers:", resp.Header)
-	body, _ := ioutil.ReadAll(resp.Body)
-	fmt.Println("response Body:", string(body))
+	// _, _ := ioutil.ReadAll(resp.Body)
+	// fmt.Println("response Body:", string(body))
 
 	resp.Body.Close()
 
@@ -76,12 +76,14 @@ func main() {
 			}
 			// fmt.Println("response Status:", resp.Status)
 			// fmt.Println("response Headers:", resp.Header)
-			// body, _ := ioutil.ReadAll(resp.Body)
+			body, _ := ioutil.ReadAll(resp.Body)
 			// fmt.Println("response Body:", string(body))
+			fmt.Println(string(body))
 			resp.Body.Close()
 
 			return
 		}(file)
+		// break
 	}
 
 	wg.Wait()
