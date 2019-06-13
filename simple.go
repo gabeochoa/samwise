@@ -245,6 +245,25 @@ func (s *Samwise) handleFoldersPost(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
+	var existingFolder Folder
+	var countFolder int
+	_ = (s.DB.
+		Where("name = ?", folder).
+		Find(&existingFolder).
+		Count(&countFolder))
+
+	if countFolder != 0 {
+		messages = append(messages, fmt.Sprintf("Folder with name %s already exists", folder))
+		respondWithJSON(w, http.StatusBadRequest,
+			GetResponse{
+				Query:    vars,
+				Data:     make(map[string]string),
+				Success:  false,
+				Messages: messages,
+			})
+		return
+	}
+
 	result := s.DB.Create(&Folder{
 		Name: folder,
 	})
