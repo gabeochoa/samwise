@@ -668,6 +668,6 @@ func RequestLogger(targetMux http.Handler) http.Handler {
 func main() {
 	s := Samwise{}
 	s.Initialize()
-	s.DB.LogMode(true)
+	// s.DB.LogMode(true)
 	s.Run(":8080")
 }
